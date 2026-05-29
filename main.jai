@@ -17,6 +17,7 @@ CLI_Arguments :: struct
     config_file := "./.jai-format"; @"?Path to a config file that should be used. If not set the formatter will search the current working directory for a .jai-format file. If no config is found the default config will be used."
     recursive: bool; @"?If set and there are directories in the argument list all directories will be formatted recursively."
     // config_overrides: [..]string; // TODO: Add option to override specific config options. This would require manually parsing the arguments because the Command_Line module currently doesn't support dynamic arrays.
+    from_stdin: bool; @"?If set the formatter reads source code from standard input instead of a file. Use with -to_stdout."
 }
 
 INTERNAL :: false;
@@ -55,6 +56,19 @@ main :: ()
     formatter := make_formatter( global_config );
 
     results: Table( string, Formatter_Status );
+
+    if cli_args.from_stdin
+    {
+        input := read_entire_stdin();
+        status, output := format_from_string( *formatter, input );
+        defer reset_formatter( *formatter );
+        if status == .OK && cli_args.to_stdout
+        {
+            print( "%\n", output );
+        }
+        return;
+    }
+    
     for free_arguments
     {
         format :: ( file: string ) #expand
@@ -224,4 +238,30 @@ with_console_color :: ( color: Ansi.Console_Color, code: Code, style: Ansi.Conso
     {
         #insert code;
     }
+}
+
+read_entire_stdin :: () -> string
+{
+    builder: String_Builder;
+    buffer: [4096] u8;
+    while true
+    {
+        #if OS == .WINDOWS
+        {
+            #import "Windows";
+            handle := GetStdHandle( STD_INPUT_HANDLE );
+            bytes_read: DWORD;
+            ok := ReadFile( handle, buffer.data, buffer.count, *bytes_read, null );
+            if !ok || bytes_read == 0 then break;
+            append( *builder, string.{ bytes_read, buffer.data } );
+        }
+        else
+        {
+            #import "POSIX";
+            bytes_read := read( 0, buffer.data, buffer.count );
+            if bytes_read <= 0 then break;
+            append( *builder, string.{ xx bytes_read, buffer.data } );
+        }
+    }
+    return builder_to_string( *builder );
 }
